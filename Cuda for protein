@@ -1,0 +1,110 @@
+Steps:
+
+
+Setting up the environment: Ensuring CUDA is installed and configured.
+Defining the problem: Simulating forces between atoms in a protein segment.
+Allocating memory on the GPU: Transferring atomic coordinates to the GPU.
+Implementing the CUDA kernel: Writing a CUDA kernel to compute the forces.
+Launching the kernel: Executing the kernel on the GPU.
+Transferring results back to the CPU: Copying the computed forces back to the host memory.
+Cleaning up: Freeing the allocated GPU memory.
+
+
+#include <cuda_runtime.h>
+#include <iostream>
+#include <vector>
+#include <cmath>
+
+// CUDA kernel to compute forces between atoms based on Lennard-Jones potential
+__global__ void computeForces(float *x, float *y, float *z, float *fx, float *fy, float *fz, int n) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n * n) return;
+
+    int i = idx / n;
+    int j = idx % n;
+
+    if (i >= j) return; // Compute only upper triangle matrix
+
+    float dx = x[i] - x[j];
+    float dy = y[i] - y[j];
+    float dz = z[i] - z[j];
+    float r2 = dx * dx + dy * dy + dz * dz;
+    float r6 = r2 * r2 * r2;
+    float r12 = r6 * r6;
+    float sigma = 1.0f;
+    float epsilon = 1.0f;
+    float f = 24 * epsilon * (2 * sigma * sigma / r12 - sigma / r6) / r2;
+
+    atomicAdd(&fx[i], f * dx);
+    atomicAdd(&fy[i], f * dy);
+    atomicAdd(&fz[i], f * dz);
+    atomicAdd(&fx[j], -f * dx);
+    atomicAdd(&fy[j], -f * dy);
+    atomicAdd(&fz[j], -f * dz);
+}
+
+int main() {
+    // Number of atoms (example segment of protein)
+    int n = 100;
+
+    // Host memory allocation
+    std::vector<float> h_x(n), h_y(n), h_z(n);
+    std::vector<float> h_fx(n, 0.0f), h_fy(n, 0.0f), h_fz(n, 0.0f);
+
+    // Initialize atom coordinates with random values
+    for (int i = 0; i < n; ++i) {
+        h_x[i] = static_cast<float>(rand()) / RAND_MAX;
+        h_y[i] = static_cast<float>(rand()) / RAND_MAX;
+        h_z[i] = static_cast<float>(rand()) / RAND_MAX;
+    }
+
+    // Device memory allocation
+    float *d_x, *d_y, *d_z, *d_fx, *d_fy, *d_fz;
+    cudaMalloc((void**)&d_x, n * sizeof(float));
+    cudaMalloc((void**)&d_y, n * sizeof(float));
+    cudaMalloc((void**)&d_z, n * sizeof(float));
+    cudaMalloc((void**)&d_fx, n * sizeof(float));
+    cudaMalloc((void**)&d_fy, n * sizeof(float));
+    cudaMalloc((void**)&d_fz, n * sizeof(float));
+
+    // Copy data from host to device
+    cudaMemcpy(d_x, h_x.data(), n * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_y, h_y.data(), n * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_z, h_z.data(), n * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_fx, h_fx.data(), n * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_fy, h_fy.data(), n * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_fz, h_fz.data(), n * sizeof(float), cudaMemcpyHostToDevice);
+
+    // Launch kernel with one thread per distance
+    int blockSize = 256;
+    int numBlocks = (n * n + blockSize - 1) / blockSize;
+    computeForces<<<numBlocks, blockSize>>>(d_x, d_y, d_z, d_fx, d_fy, d_fz, n);
+
+    // Copy results back to host
+    cudaMemcpy(h_fx.data(), d_fx, n * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_fy.data(), d_fy, n * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaMemcpy(h_fz.data(), d_fz, n * sizeof(float), cudaMemcpyDeviceToHost);
+
+    // Free device memory
+    cudaFree(d_x);
+    cudaFree(d_y);
+    cudaFree(d_z);
+    cudaFree(d_fx);
+    cudaFree(d_fy);
+    cudaFree(d_fz);
+
+    // Example output
+    for (int i = 0; i < n; ++i) {
+        std::cout << "Force on atom " << i << ": (" << h_fx[i] << ", " << h_fy[i] << ", " << h_fz[i] << ")\n";
+    }
+
+    return 0;
+} explanation 
+    CUDA Kernel: computeForces computes the forces between pairs of atoms using the Lennard-Jones potential, which is commonly used in molecular simulations.
+    Memory Allocation: Allocate memory for atom coordinates and forces on both the host (CPU) and device (GPU).
+    Data Transfer: Copy the atom coordinates from the host to the device.
+    Kernel Execution: Launch the kernel to compute the forces.
+    Data Retrieval: Copy the computed forces back from the device to the host.
+    Cleanup: Free the allocated device memory.
+
+Next Steps:
